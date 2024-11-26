@@ -1,1 +1,2 @@
-MAX_LEN = 256
+MAX_LEN: int = 256
+MAX_PUB: int = 10

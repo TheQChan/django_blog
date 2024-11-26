@@ -1,30 +1,17 @@
 from django.shortcuts import get_object_or_404, render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Count
+from django.db.models import Count
 from django.contrib.auth import get_user_model
-from django.core.paginator import Paginator
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.views.generic import CreateView, UpdateView, DeleteView
-from datetime import datetime
+
 from blog.models import Comment, Post, Category
 from .forms import PostForm, CommentForm, ProfileEditForm
+from .utils import getting_posts, get_paginator
 
 
 User = get_user_model()
-
-
-def getting_posts(category_slug=None):
-    time_now = datetime.now()
-    posts = Post.objects.filter(
-        pub_date__date__lt=time_now,
-        is_published=True,
-    ).filter(
-        Q(category__slug=category_slug)
-        if category_slug
-        else Q(category__is_published=True)
-    )
-    return posts
 
 
 def index(request):
@@ -33,9 +20,7 @@ def index(request):
     posts = draft_posts.annotate(
         comment_count=Count('comment')
     ).order_by('-pub_date')
-    paginator = Paginator(posts, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    page_obj = get_paginator(posts, request)
     context = {'page_obj': page_obj}
     return render(request, template, context)
 
@@ -50,7 +35,7 @@ def post_detail(request, pk):
         )
 
     post = get_object_or_404(post_queryset, pk=pk)
-    comments = Comment.objects.filter(post=post)
+    comments = post.comment.all()
     context = {'post': post, 'comments': comments, 'form': CommentForm()}
     return render(request, template, context)
 
@@ -58,9 +43,7 @@ def post_detail(request, pk):
 def category_posts(request, category_slug):
     template = 'blog/category.html'
     posts = getting_posts(category_slug).order_by('-pub_date')
-    paginator = Paginator(posts, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    page_obj = get_paginator(posts, request)
     category = get_object_or_404(
         Category, slug=category_slug, is_published=True
     )
@@ -121,9 +104,7 @@ def profile(request, username):
         .filter(author=user)
         .order_by('-pub_date')
     )
-    paginator = Paginator(posts, 10)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    page_obj = get_paginator(posts, request)
     context = {'page_obj': page_obj, 'profile': user}
     return render(request, 'blog/profile.html', context)
 
@@ -154,15 +135,16 @@ def add_comment(request, pk):
     return redirect('blog:post_detail', pk=pk)
 
 
-class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+class CommentMixin(UserPassesTestMixin):
     model = Comment
     form_class = CommentForm
     template_name = 'blog/comment.html'
 
     def get_object(self):
-        pk = self.kwargs['pk']
         comment_id = self.kwargs['comment_id']
-        comment = get_object_or_404(Comment, pk=comment_id, post__id=pk)
+        comment = get_object_or_404(
+            Comment, pk=comment_id, post__id=self.kwargs['pk']
+        )
         return comment
 
     def test_func(self):
@@ -175,22 +157,9 @@ class CommentUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         )
 
 
-class CommentDeleteView(UserPassesTestMixin, DeleteView):
-    model = Comment
-    form_class = CommentForm
-    template_name = 'blog/comment.html'
+class CommentUpdateView(CommentMixin, UpdateView):
+    pass
 
-    def get_object(self):
-        pk = self.kwargs['pk']
-        comment_id = self.kwargs['comment_id']
-        comment = get_object_or_404(Comment, pk=comment_id, post__id=pk)
-        return comment
 
-    def test_func(self):
-        comment = self.get_object()
-        return comment.author == self.request.user
-
-    def get_success_url(self):
-        return reverse_lazy(
-            'blog:post_detail', kwargs={'pk': self.kwargs['pk']}
-        )
+class CommentDeleteView(CommentMixin, DeleteView):
+    pass

@@ -10,6 +10,7 @@ class PostForm(forms.ModelForm):
         model = Post
         exclude = ('author',)
         widgets = {
+            # Все подставляется при редактировании
             'pub_date': forms.DateInput(attrs={'type': 'date'}),
         }
 
