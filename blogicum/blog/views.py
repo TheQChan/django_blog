@@ -6,9 +6,10 @@ from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.views.generic import CreateView, UpdateView, DeleteView
 
-from blog.models import Comment, Post, Category
+from .models import Post, Category
 from .forms import PostForm, CommentForm, ProfileEditForm
 from .utils import getting_posts, get_paginator
+from .mixin import CommentMixin
 
 
 User = get_user_model()
@@ -16,9 +17,8 @@ User = get_user_model()
 
 def index(request):
     template = 'blog/index.html'
-    draft_posts = getting_posts()
-    posts = draft_posts.annotate(
-        comment_count=Count('comment')
+    posts = getting_posts().annotate(
+        comment_count=Count('comments')
     ).order_by('-pub_date')
     page_obj = get_paginator(posts, request)
     context = {'page_obj': page_obj}
@@ -33,10 +33,10 @@ def post_detail(request, pk):
         post_queryset = post_queryset | Post.objects.filter(
             author=request.user
         )
-
     post = get_object_or_404(post_queryset, pk=pk)
-    comments = post.comment.all()
-    context = {'post': post, 'comments': comments, 'form': CommentForm()}
+    context = {
+        'post': post, 'comments': post.comments.all(), 'form': CommentForm()
+    }
     return render(request, template, context)
 
 
@@ -100,7 +100,7 @@ class PostDeleteView(UserPassesTestMixin, DeleteView):
 def profile(request, username):
     user = get_object_or_404(User, username=username)
     posts = (
-        Post.objects.annotate(comment_count=Count('comment'))
+        Post.objects.annotate(comment_count=Count('comments'))
         .filter(author=user)
         .order_by('-pub_date')
     )
@@ -133,28 +133,6 @@ def add_comment(request, pk):
         comment.post = post
         comment.save()
     return redirect('blog:post_detail', pk=pk)
-
-
-class CommentMixin(UserPassesTestMixin):
-    model = Comment
-    form_class = CommentForm
-    template_name = 'blog/comment.html'
-
-    def get_object(self):
-        comment_id = self.kwargs['comment_id']
-        comment = get_object_or_404(
-            Comment, pk=comment_id, post__id=self.kwargs['pk']
-        )
-        return comment
-
-    def test_func(self):
-        comment = self.get_object()
-        return comment.author == self.request.user
-
-    def get_success_url(self):
-        return reverse_lazy(
-            'blog:post_detail', kwargs={'pk': self.kwargs['pk']}
-        )
 
 
 class CommentUpdateView(CommentMixin, UpdateView):
